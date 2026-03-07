@@ -21,12 +21,18 @@ Graph_database/
 ├── scrape_citation_edges.py   # Step 1.3 — scrape outgoing citation edges per case
 ├── normalize_citations.py     # Step 1.4 — normalize citation strings with eyecite
 ├── enrich_citations.py        # enrich scraped cases with cited opinion IDs
+├── load_neo4j.py              # Step 2.1 — load Case + Judge nodes into Neo4j
+├── coverage_check.py          # Step 2.2 — verify citation coverage against Neo4j
+├── query_kg.py                # Step 3   — run KG queries for all 6 tasks
+├── results/
+│   └── coverage_summary.md   # coverage results as of 2026-03-07
 ├── scraped_cases.json         # scraping progress cache (gitignored)
 ├── citation_edges.json        # cluster_id -> [cited_opinion_ids] (gitignored)
 ├── citation_lookup.json       # normalized_citation -> cluster_id (gitignored)
 ├── legal_hallucinations/      # dataset folder (gitignored)
+├── methodology.md             # full methodology notes
 ├── requirements.txt
-├── .env                       # API token (gitignored)
+├── .env                       # API keys (gitignored)
 └── .gitignore
 ```
 
@@ -41,35 +47,50 @@ pip install -r requirements.txt
 Create a `.env` file:
 ```
 COURTLISTENER_TOKEN=your_token_here
+NEO4J_URI=neo4j://127.0.0.1:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_password_here
 ```
-Get a token at [courtlistener.com](https://www.courtlistener.com/sign-in/).
+
+Get a CourtListener token at [courtlistener.com](https://www.courtlistener.com/sign-in/).
 
 ## Pipeline
 
-Run scripts in order:
-
 ```bash
 # 1. Explore the dataset
-python explore_dataset.py
+python3 explore_dataset.py
 
-# 2. Scrape case metadata from CourtListener (resumes automatically if interrupted)
-python scrape_cases.py --yes
+# 2. Scrape case metadata from CourtListener (resumes if interrupted)
+python3 scrape_cases.py --yes
 
-# 3. Scrape citation edges for each case
-python scrape_citation_edges.py
+# 3. Scrape citation edges per case
+python3 scrape_citation_edges.py
 
 # 4. Normalize citation strings with eyecite
-python normalize_citations.py
+python3 normalize_citations.py
 
-# 5. Enrich scraped cases with cited opinion IDs
-python enrich_citations.py
+# 5. Load Case + Judge nodes into Neo4j
+python3 load_neo4j.py
+
+# 6. Check citation coverage
+python3 coverage_check.py
+
+# 7. Run KG queries for all 6 tasks
+python3 query_kg.py
 ```
 
-All scraping scripts respect a daily API limit of 4800 requests and resume from where they left off.
+All scraping scripts respect a daily API limit of 4,800 requests and resume from where they left off.
 
-## Relevant tasks from dataset
+## Coverage (as of 2026-03-07)
 
-The scraper filters to these task types: `case_existence`, `citation_retrieval`, `cited_precedent`, `court_id`, `majority_author`, `year_overruled`.
+| Court | Found | Total | Coverage |
+|-------|-------|-------|----------|
+| SCOTUS | 4,708 | 4,711 | 99.9% |
+| COA | 4,528 | 4,528 | 100.0% |
+| USDC | 4,495 | 4,497 | 100.0% |
+| **Total** | **13,731** | **13,736** | **100.0%** |
+
+See `methodology.md` for full methodology and graph schema.
 
 ## References
 
