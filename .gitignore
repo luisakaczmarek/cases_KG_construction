@@ -1,3 +1,6 @@
 .env
 .DS_Store
 scraped_cases.json
+citation_edges.json
+citation_lookup.json
+legal_hallucinations/

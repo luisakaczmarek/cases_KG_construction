@@ -24,6 +24,7 @@ RELEVANT_TASKS = {"case_existence", "court_id", "citation_retrieval", "majority_
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+parser.add_argument("--retry-errors", action="store_true", help="Retry previously errored citations")
 args = parser.parse_args()
 
 # ── 1. Load dataset and inspect citation column ───────────────────────────────
@@ -89,7 +90,13 @@ print(f"\nUnique citations after task filter ({', '.join(sorted(RELEVANT_TASKS))
 if os.path.exists(OUTPUT_PATH):
     with open(OUTPUT_PATH) as f:
         results = json.load(f)
-    print(f"Resuming — {len(results)} citations already scraped.")
+    if args.retry_errors:
+        error_keys = [k for k, v in results.items() if v.get("status") == "error"]
+        for k in error_keys:
+            del results[k]
+        print(f"Resuming — {len(results)} citations already scraped, retrying {len(error_keys)} errors.")
+    else:
+        print(f"Resuming — {len(results)} citations already scraped.")
 else:
     results = {}
 
