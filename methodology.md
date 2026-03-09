@@ -27,10 +27,7 @@ normalize_citations.py   # eyecite → citation_lookup.json
 enrich_citations.py      # merge edges into scraped_cases.json
     │
     ▼
-load_neo4j.py            # → populated Neo4j graph (Case + Judge nodes)
-    │
-    ▼
-query_kg.py              # → kg_results.csv (KG answers for all 6 tasks)
+load_neo4j.py            # (Week 2) → populated Neo4j graph
 ```
 
 ---
@@ -155,7 +152,7 @@ GET /opinions/?cluster={cluster_id}
 
 Keys are `cluster_id` strings; values are lists of cited opinion IDs. Deduplicated by `cluster_id` — multiple citation strings that resolve to the same cluster are processed once.
 
-Scope: **13,625 unique cluster IDs** across multiple daily sessions (~11,300 processed as of 2026-03-08, final run pending).
+Scope: **13,625 unique cluster IDs** across multiple daily sessions.
 
 ---
 
@@ -193,7 +190,7 @@ Merges `citation_edges.json` into `scraped_cases.json`, adding a `cited_opinion_
 
 ---
 
-## Step 6 — Neo4j Graph Loading (`load_neo4j.py`)
+## Neo4j Schema (Week 2 — `load_neo4j.py`)
 
 ### Node types
 
@@ -206,18 +203,9 @@ Merges `citation_edges.json` into `scraped_cases.json`, adding a `cited_opinion_
 
 | Relationship | From → To | Properties |
 |---|---|---|
-| `authored_by` | `Case` → `Judge` | — |
-| `cites` | `Case` → `Case` | — *(pending: load_cites.py)* |
-| `overruled_by` | `Case` → `Case` | `year_overruled` *(pending)* |
-
-### Load results (2026-03-07)
-
-| Metric | Count |
-|---|---|
-| Case nodes | 13,731 |
-| Judge nodes | 1,279 |
-| `authored_by` edges | 4,338 |
-| Errors | 0 |
+| `AUTHORED_BY` | `Case` → `Judge` | — |
+| `CITES` | `Case` → `Case` | — |
+| `OVERRULED_BY` | `Case` → `Case` | `year_overruled` (where extractable) |
 
 ### Design decisions
 
@@ -235,40 +223,6 @@ CREATE INDEX case_name     IF NOT EXISTS FOR (c:Case) ON (c.name)
 
 ---
 
-## Step 7 — Coverage Check (`coverage_check.py`)
-
-Verifies that dataset citations are present as Case nodes in Neo4j.
-
-### Results (2026-03-07)
-
-| Court | Found | Total | Coverage |
-|-------|-------|-------|----------|
-| SCOTUS | 4,708 | 4,711 | 99.9% |
-| COA | 4,528 | 4,528 | 100.0% |
-| USDC | 4,495 | 4,497 | 100.0% |
-| **Total** | **13,731** | **13,736** | **100.0%** |
-
-5 missing cases are genuinely absent from CourtListener. Coverage is not a binding constraint — all court levels are included.
-
----
-
-## Step 8 — KG Query Evaluation (`query_kg.py`)
-
-For each row in the dataset, the KG is queried using the appropriate Cypher pattern:
-
-| Task | Cypher |
-|------|--------|
-| `case_existence` | `MATCH (c:Case {citation: $c}) RETURN count(c) > 0` |
-| `court_id` | `MATCH (c:Case {citation: $c}) RETURN c.court_level` |
-| `citation_retrieval` | `MATCH (c:Case) WHERE toLower(c.name) CONTAINS toLower($name) RETURN c.citation LIMIT 1` |
-| `majority_author` | `MATCH (c:Case {citation: $c})-[:authored_by]->(j) RETURN j.name` |
-| `cited_precedent` | `MATCH (c:Case {citation: $c})-[:cites]->(p) RETURN p.citation` |
-| `year_overruled` | `MATCH (c:Case {citation: $c})-[e:overruled_by]->() RETURN e.year_overruled` |
-
-KG answers are compared against `example_correct_answer` and LLM outputs from the dataset to measure hallucination reduction. Output saved to `kg_results.csv`.
-
----
-
 ## Scope and Limitations
 
 **KG scope:** The graph contains only the ~13,731 cases appearing in the Dahl et al. benchmark. Multi-hop traversal (e.g. "cases cited by cases that cite X") is not required by any Part 1 task and is not supported.
@@ -280,6 +234,31 @@ KG answers are compared against `example_correct_answer` and LLM outputs from th
 **USDC coverage:** District court cases are substantially underrepresented in CourtListener relative to SCOTUS and COA. All results are stratified by court level; low USDC coverage is reported as a limitation rather than treated as a scoring failure.
 
 **Partial overrulings:** Cases with ambiguous or partial overruling treatment are excluded from the `OVERRULED_BY` edge; only unambiguous full overrulings are modelled.
+
+---
+
+## Step 9 — Evaluation (`evaluate.py`)
+
+Compares KG answers from `kg_results.csv` against `example_correct_answer` and the LLM baseline.
+
+**LLM baseline:** `hallucination == False` (dataset column)
+
+**Per-task matching logic:**
+
+| Task | KG answer | Matching |
+|------|-----------|----------|
+| `case_existence` | `True`/`False` | True = correct (all dataset cases exist in graph) |
+| `court_id` | Court slug (e.g. `ca9`, `scotus`) | COA: extract circuit number (`ca9→9`); SCOTUS: slug→"Supreme Court"; USDC: slug→state name lookup |
+| `citation_retrieval` | Citation string | Normalised string match (strip year suffix, trailing periods) |
+| `majority_author` | Judge name string | Last-name overlap, case-insensitive; handles "Per Curiam" |
+| `cited_precedent` | List of citations | `example_correct_answer` citation contained in KG list |
+| `year_overruled` | Integer year | Integer equality |
+
+**Output:**
+- `results/evaluation_results.csv` — accuracy per task (LLM%, KG%, delta)
+- `results/evaluation_detail.csv` — row-level correct/incorrect flags
+
+**Note:** `cited_precedent` and `year_overruled` accuracy will be near 0 until `:cites` and `:overruled_by` edges are loaded (`load_cites.py`, `load_overruled.py`).
 
 ---
 
