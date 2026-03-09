@@ -27,50 +27,30 @@ OUTPUT_PATH     = "results/evaluation_results.csv"
 
 os.makedirs("results", exist_ok=True)
 
-# ── Court slug → expected answer mapping ──────────────────────────────────────
-# CourtListener slug (stored in Neo4j) → dataset example_correct_answer format
+# ── Court name → expected answer mapping ──────────────────────────────────────
+# Neo4j stores full court names from CourtListener (e.g. "Court of Appeals for
+# the Ninth Circuit"). The dataset expected answers are:
+#   SCOTUS → "Supreme Court"
+#   COA    → circuit number string "1"–"13"  (DC=12, Federal=13)
+#   USDC   → full district court name string
 
-# COA: "ca1"–"ca13" → "1"–"13"
-_COA_RE = re.compile(r"ca(\d+)$", re.IGNORECASE)
+# COA: ordinal word → circuit number
+_COA_ORDINAL = {
+    "first": "1", "second": "2", "third": "3", "fourth": "4",
+    "fifth": "5", "sixth": "6", "seventh": "7", "eighth": "8",
+    "ninth": "9", "tenth": "10", "eleventh": "11",
+    "d.c.": "12", "federal": "13",
+}
 
-# SCOTUS
-_SCOTUS_ANSWERS = {"supreme court", "scotus", "u.s. supreme court"}
-
-# USDC slug → state name (CourtListener slug prefix → state)
-_USDC_STATE = {
-    "d-alaska": "alaska",  "d-ariz": "arizona",    "ed-ark": "arkansas",
-    "wd-ark": "arkansas",  "nd-cal": "california",  "cd-cal": "california",
-    "sd-cal": "california","ed-cal": "california",  "d-colo": "colorado",
-    "d-conn": "connecticut","d-del": "delaware",    "ddc": "d.c.",
-    "sd-fla": "florida",   "nd-fla": "florida",     "md-fla": "florida",
-    "d-fla": "florida",    "nd-ga": "georgia",      "md-ga": "georgia",
-    "sd-ga": "georgia",    "d-haw": "hawaii",       "d-idaho": "idaho",
-    "nd-ill": "illinois",  "sd-ind": "indiana",     "nd-ind": "indiana",
-    "sd-iowa": "iowa",     "nd-iowa": "iowa",        "d-kan": "kansas",
-    "ed-ky": "kentucky",   "wd-ky": "kentucky",     "ed-la": "louisiana",
-    "wd-la": "louisiana",  "md-la": "louisiana",    "d-me": "maine",
-    "d-md": "maryland",    "d-mass": "massachusetts","ed-mich": "michigan",
-    "wd-mich": "michigan", "d-minn": "minnesota",   "sd-miss": "mississippi",
-    "nd-miss": "mississippi","wd-mo": "missouri",   "ed-mo": "missouri",
-    "d-mont": "montana",   "d-neb": "nebraska",     "d-nev": "nevada",
-    "dnh": "new hampshire","dnj": "new jersey",     "dnm": "new mexico",
-    "edny": "new york",    "sdny": "new york",      "ndny": "new york",
-    "wdny": "new york",    "mdnc": "north carolina","wdnc": "north carolina",
-    "ednc": "north carolina","dnd": "north dakota", "nd-ohio": "ohio",
-    "sd-ohio": "ohio",     "nd-okla": "oklahoma",   "ed-okla": "oklahoma",
-    "wd-okla": "oklahoma", "d-or": "oregon",        "ed-pa": "pennsylvania",
-    "md-pa": "pennsylvania","wd-pa": "pennsylvania","dpr": "puerto rico",
-    "dri": "rhode island", "dsc": "south carolina", "wdsc": "south carolina",
-    "edsc": "south carolina","d-sd": "south dakota","ed-tenn": "tennessee",
-    "md-tenn": "tennessee","wd-tenn": "tennessee",  "d-tenn": "tennessee",
-    "ed-tex": "texas",     "nd-tex": "texas",        "sd-tex": "texas",
-    "wd-tex": "texas",     "d-utah": "utah",         "d-vt": "vermont",
-    "dvi": "virgin islands","ed-va": "virginia",     "wd-va": "virginia",
-    "ed-wash": "washington","wd-wash": "washington", "ndw-va": "west virginia",
-    "sdw-va": "west virginia","ed-wis": "wisconsin", "wd-wis": "wisconsin",
-    "d-wyo": "wyoming",    "d-alaska-1": "alaska",  "d-mass-1": "massachusetts",
-    "d-minn-1": "minnesota","sd-ala": "alabama",    "md-ala": "alabama",
-    "nd-ala": "alabama",   "ddc-2": "d.c.",
+# USDC: district prefix abbreviation → full word
+_DISTRICT_PREFIX = {
+    "n.d.": "northern", "nd": "northern",
+    "s.d.": "southern", "sd": "southern",
+    "e.d.": "eastern",  "ed": "eastern",
+    "w.d.": "western",  "wd": "western",
+    "m.d.": "middle",   "md": "middle",
+    "c.d.": "central",  "cd": "central",
+    "d.":   "",         "d":  "",
 }
 
 
@@ -89,26 +69,46 @@ def norm_citation(s) -> str:
 def match_court_id(kg_answer, correct_answer) -> bool:
     if kg_answer is None:
         return False
-    slug = norm(kg_answer)
-    ans  = norm(correct_answer)
+    kg  = norm(kg_answer)
+    ans = norm(correct_answer)
 
-    # SCOTUS
-    if slug == "scotus":
-        return ans in _SCOTUS_ANSWERS or "supreme" in ans
+    # SCOTUS: "supreme court of the united states" → "supreme court"
+    if "supreme court" in kg:
+        return "supreme court" in ans or "scotus" in ans
 
-    # COA: "ca9" → "9"
-    m = _COA_RE.match(slug)
-    if m:
-        return m.group(1) == ans
+    # COA: "court of appeals for the X circuit" → circuit number
+    if "court of appeals" in kg:
+        for word, num in _COA_ORDINAL.items():
+            if word in kg:
+                return ans == num
+        return False
 
-    # USDC: match via state lookup, or slug-contains check
-    # Try stripping trailing digits/dashes for lookup
-    slug_base = re.sub(r"[-_]\d+$", "", slug)
-    state = _USDC_STATE.get(slug_base) or _USDC_STATE.get(slug)
-    if state and state in ans:
-        return True
-    # Fallback: any slug token appears in answer
-    return any(part in ans for part in slug.split("-") if len(part) > 2)
+    # USDC: "District Court, [prefix]. [State]" → full district court name
+    # Extract district prefix and state/location from KG answer
+    if "district court" in kg:
+        # Special case: "district of columbia"
+        if "district of columbia" in kg or ", ddc" in kg:
+            return "district of columbia" in ans
+
+        # Parse "District Court, N.D. California" or "District Court, S.D.N.Y."
+        parts = kg.split(",", 1)
+        if len(parts) > 1:
+            loc = parts[1].strip()  # e.g. "n.d. california" or "s.d.n.y."
+            # Remove district prefix tokens to get state name
+            state = loc
+            for abbr in sorted(_DISTRICT_PREFIX, key=len, reverse=True):
+                if state.startswith(abbr):
+                    state = state[len(abbr):].strip()
+                    break
+            # state might be "new york" or "n.y." — check if it appears in ans
+            state = state.rstrip(".")
+            if state and len(state) > 2 and state in ans:
+                return True
+        # Fallback: any substantial token in kg appears in answer
+        return any(t in ans for t in kg.split() if len(t) > 3)
+
+    # Unknown court type — fuzzy fallback
+    return any(t in ans for t in kg.split() if len(t) > 3)
 
 
 def match_author(kg_answer, correct_answer) -> bool:

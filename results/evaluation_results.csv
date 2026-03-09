@@ -1,0 +1,7 @@
+task,n,llm_accuracy_pct,kg_accuracy_pct,delta_pct
+case_existence,108344,79.74,99.96,20.23
+court_id,108344,50.89,87.79,36.9
+citation_retrieval,108344,18.16,24.58,6.42
+majority_author,108346,7.8,15.76,7.96
+cited_precedent,108344,3.94,0.0,-3.94
+year_overruled,1776,11.15,0.0,-11.15

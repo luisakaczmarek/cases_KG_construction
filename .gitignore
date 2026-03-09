@@ -4,3 +4,7 @@ scraped_cases.json
 citation_edges.json
 citation_lookup.json
 legal_hallucinations/
+opinion_cluster_map.json
+kg_results.csv
+coverage_report.csv
+*_log.txt
