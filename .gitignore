@@ -8,3 +8,4 @@ opinion_cluster_map.json
 kg_results.csv
 coverage_report.csv
 *_log.txt
+results/evaluation_detail.csv
